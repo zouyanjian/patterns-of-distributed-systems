@@ -1,4 +1,4 @@
-# 可复制日志（Replicated Log）
+# 复制日志（Replicated Log）
 
 **原文**
 
@@ -23,3 +23,9 @@ https://martinfowler.com/articles/patterns-of-distributed-systems/replicated-log
 * 一个阶段负责在所有集群节点上复制请求。
 
 每次状态变化的请求都去执行两个阶段，这么做并不高效。所以，集群节点会在启动时选择一个领导者。领导者会在选举阶段建立起[世代时钟（Generation Clock）](generation-clock.md)，然后检测上一个 [Quorum](quorum.md) 所有的日志项。（前一个领导者或许已经将大部分日志项复制到了大多数集群节点上。）一旦有了一个稳定的领导者，复制就只由领导者协调了。客户端与领导者通信。领导者将每个请求添加到日志中，并确保其复制到到所有的追随者上。一旦日志项成功地复制到大多数追随者，共识就算已经达成。按照这种方式，当有一个稳定的领导者时，对于每次状态变化的操作，只要执行一个阶段就可以达成共识。
+
+### 多 Paxos 和 Raft
+
+[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s) 和 [Raft](https://raft.github.io/) 是最流行的实现复制日志的算法。多 Paxos 只在学术论文中有模糊的描述。[Spanner](https://cloud.google.com/spanner) 和 [Cosmos DB](https://docs.microsoft.com/en-us/azure/cosmos-db/introduction) 等云数据库采用了[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s)，但实现细节却没有很好地记录下来。Raft 非常清楚地记录了所有的实现细节，因此，它成了大多数开源系统的首选实现方式，尽管 Paxos 及其变体在学术界得到了讨论得更多。
+
+下面的章节描述了如何实现复制日志。
