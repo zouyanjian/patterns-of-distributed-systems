@@ -26,6 +26,99 @@ https://martinfowler.com/articles/patterns-of-distributed-systems/replicated-log
 
 ### 多 Paxos 和 Raft
 
-[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s) 和 [Raft](https://raft.github.io/) 是最流行的实现复制日志的算法。多 Paxos 只在学术论文中有模糊的描述。[Spanner](https://cloud.google.com/spanner) 和 [Cosmos DB](https://docs.microsoft.com/en-us/azure/cosmos-db/introduction) 等云数据库采用了[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s)，但实现细节却没有很好地记录下来。Raft 非常清楚地记录了所有的实现细节，因此，它成了大多数开源系统的首选实现方式，尽管 Paxos 及其变体在学术界得到了讨论得更多。
+[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s) 和 [Raft](https://raft.github.io/) 是最流行的实现复制日志的算法。多 Paxos 只在学术论文中有描述，却又语焉不详。[Spanner](https://cloud.google.com/spanner) 和 [Cosmos DB](https://docs.microsoft.com/en-us/azure/cosmos-db/introduction) 等云数据库采用了[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s)，但实现细节却没有很好地记录下来。Raft 非常清楚地记录了所有的实现细节，因此，它成了大多数开源系统的首选实现方式，尽管 Paxos 及其变体在学术界得到了讨论得更多。
 
-下面的章节描述了如何实现复制日志。
+#### 复制客户端请求
+
+![复制内核](../image/raft-replication.png)
+<center>图1：复制</center>
+
+对于每个日志项而言，领导者会将其追加到其本地的预写日志中，然后，将其发送给所有追随者。
+
+```java
+leader (class ReplicatedLog...)
+
+  private Long appendAndReplicate(byte[] data) {
+      Long lastLogEntryIndex = appendToLocalLog(data);
+      replicateOnFollowers(lastLogEntryIndex);
+      return lastLogEntryIndex;
+  }
+
+
+  private void replicateOnFollowers(Long entryAtIndex) {
+      for (final FollowerHandler follower : followers) {
+          replicateOn(follower, entryAtIndex); //send replication requests to followers
+      }
+  }
+```
+
+追随者处理复制请求，将日志条目追加到其本地日志中。在成功追加日志项后，他们将其拥有的最新日志项索引回应给领导者。应答还要包括服务器的当前[世代时钟](generation-clock.md)。
+
+追随者还会检查日志项是否已经存在，或者是否存在超出正在复制的日志项。它会忽略了已经存在的日志项。但是，如果有来自不同世代的日志项，它们也会删除存在冲突的日志项。
+
+```java
+follower (class ReplicatedLog...)
+
+  void maybeTruncate(ReplicationRequest replicationRequest) {
+      replicationRequest.getEntries().stream()
+              .filter(entry -> wal.getLastLogIndex() >= entry.getEntryIndex() &&
+                      entry.getGeneration() != wal.readAt(entry.getEntryIndex()).getGeneration())
+              .forEach(entry -> wal.truncate(entry.getEntryIndex()));
+  }
+follower (class ReplicatedLog...)
+
+  private ReplicationResponse appendEntries(ReplicationRequest replicationRequest) {
+      List<WALEntry> entries = replicationRequest.getEntries();
+      entries.stream()
+              .filter(e -> !wal.exists(e))
+              .forEach(e -> wal.writeEntry(e));
+      return new ReplicationResponse(SUCCEEDED, serverId(), replicationState.getGeneration(), wal.getLastLogIndex());
+  }
+```
+
+当复制请求中的世代数低于服务器知道的最新世代数时，跟随者会拒绝这个复制请求。这样一来就给了领导一个通知，让它下台，变成一个追随者。
+
+```java
+follower (class ReplicatedLog...)
+
+  Long currentGeneration = replicationState.getGeneration();
+  if (currentGeneration > request.getGeneration()) {
+      return new ReplicationResponse(FAILED, serverId(), currentGeneration, wal.getLastLogIndex());
+  }
+```
+
+收到响应后，领导者会追踪每个服务器上复制的日志索引。领导者会利用它
+追踪成功复制到 [Quorum](quorum.md) 日志项，这个索引会当做提交索引（commitIndex）。commitIndex 就是日志中的[高水位标记（High-Water Mark）](high-water-mark.md)
+
+```java
+leader (class ReplicatedLog...)
+
+  logger.info("Updating matchIndex for " + response.getServerId() + " to " + response.getReplicatedLogIndex());
+  updateMatchingLogIndex(response.getServerId(), response.getReplicatedLogIndex());
+  var logIndexAtQuorum = computeHighwaterMark(logIndexesAtAllServers(), config.numberOfServers());
+  var currentHighWaterMark = replicationState.getHighWaterMark();
+  if (logIndexAtQuorum > currentHighWaterMark && logIndexAtQuorum != 0) {
+      applyLogEntries(currentHighWaterMark, logIndexAtQuorum);
+      replicationState.setHighWaterMark(logIndexAtQuorum);
+  }
+
+leader (class ReplicatedLog...)
+
+  Long computeHighwaterMark(List<Long> serverLogIndexes, int noOfServers) {
+      serverLogIndexes.sort(Long::compareTo);
+      return serverLogIndexes.get(noOfServers / 2);
+  }
+
+leader (class ReplicatedLog...)
+
+  private void updateMatchingLogIndex(int serverId, long replicatedLogIndex) {
+      FollowerHandler follower = getFollowerHandler(serverId);
+      follower.updateLastReplicationIndex(replicatedLogIndex);
+  }
+
+leader (class ReplicatedLog...)
+
+  public void updateLastReplicationIndex(long lastReplicatedLogIndex) {
+      this.matchIndex = lastReplicatedLogIndex;
+  }
+```
