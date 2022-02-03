@@ -122,3 +122,47 @@ leader (class ReplicatedLog...)
       this.matchIndex = lastReplicatedLogIndex;
   }
 ```
+
+##### 完全复制
+
+有一点非常重要，就是要确保所有的节点都能收到来自领导者所有的日志项，即便是节点断开连接，或是崩溃之后又恢复之后。Raft 有个机制确保所有的集群节点能够收到来自领导者的所有日志项。
+
+在 Raft 的每个复制请求中，领导者还会发送在复制日志项前一项的日志索引及其世代。如果前一项的日志项索引和世代与本地日志中的不匹配，追随者会拒绝该请求。这向领导者表明，追随者的日志需要同步一些较早的日志项。
+
+```java
+follower (class ReplicatedLog...)
+
+  if (!wal.isEmpty() && request.getPrevLogIndex() >= wal.getLogStartIndex() &&
+           generationAt(request.getPrevLogIndex()) != request.getPrevLogGeneration()) {
+      return new ReplicationResponse(FAILED, serverId(), replicationState.getGeneration(), wal.getLastLogIndex());
+  }
+
+follower (class ReplicatedLog...)
+
+  private Long generationAt(long prevLogIndex) {
+      WALEntry walEntry = wal.readAt(prevLogIndex);
+
+      return walEntry.getGeneration();
+  }
+```
+
+这样，领导者会递减匹配索引（matchIndex），并尝试发送较低索引的日志项。它会一直这么做，直到追随者接受复制请求。
+
+```java
+leader (class ReplicatedLog...)
+
+  //rejected because of conflicting entries, decrement matchIndex
+  FollowerHandler peer = getFollowerHandler(response.getServerId());
+  logger.info("decrementing nextIndex for peer " + peer.getId() + " from " + peer.getNextIndex());
+  peer.decrementNextIndex();
+  replicateOn(peer, peer.getNextIndex());
+```
+
+这个对前一项日志索引和世代的检查允许领导者检测两件事。
+
+* 追随者是否存在日志项缺失。例如，如果追随者只有一个日志项，而领导者要开始复制第三个日志项，那么，这个请求就会遭到拒绝，直到领导者复制第二个日志项。
+* 日志中的前一项是否来自不同的世代，与领导者日志中的对应项相比，是高还是低。领导者会尝试复制索引较低的日志项，直到请求得到接受。追随者会截断世代不匹配的日志项。
+
+按照这种方式，领导者通过使用前一项的索引检测缺失或冲突的日志项，尝试将自己的日志推送给所有的追随者。这就确保了所有的集群节点最终都能收到来自领导者的所有日志项，即使它们断开了一段时间的连接。
+
+Raft 没有单独的提交消息，而是将提交索引（commitIndex）作为常规复制请求的一部分进行发送。空的复制请求也可以当做心跳发送。因此，commitIndex 会当做心跳请求的一部分发送给追随者。
