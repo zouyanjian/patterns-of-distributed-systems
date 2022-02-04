@@ -166,3 +166,33 @@ leader (class ReplicatedLog...)
 按照这种方式，领导者通过使用前一项的索引检测缺失或冲突的日志项，尝试将自己的日志推送给所有的追随者。这就确保了所有的集群节点最终都能收到来自领导者的所有日志项，即使它们断开了一段时间的连接。
 
 Raft 没有单独的提交消息，而是将提交索引（commitIndex）作为常规复制请求的一部分进行发送。空的复制请求也可以当做心跳发送。因此，commitIndex 会当做心跳请求的一部分发送给追随者。
+
+##### 日志项以日志顺序执行
+
+一旦领导者更新了它的 commitIndex，它就会按顺序执行日志项，从上一个 commitIndex 的值执行到最新的 commitIndex 值。一旦日志项执行完毕，客户端请求就完成了，应答会返回给客户端。
+
+```java
+class ReplicatedLog…
+
+  private void applyLogEntries(Long previousCommitIndex, Long commitIndex) {
+      for (long index = previousCommitIndex + 1; index <= commitIndex; index++) {
+          WALEntry walEntry = wal.readAt(index);
+          var responses = stateMachine.applyEntries(Arrays.asList(walEntry));
+          completeActiveProposals(index, responses);
+      }
+  }
+```
+
+领导者还会在它发送给追随者的心跳请求中发送 commitIndex。追随者会更新 commitIndex，并以同样的方式应用这些日志项。
+
+```java
+class ReplicatedLog…
+
+  private void updateHighWaterMark(ReplicationRequest request) {
+      if (request.getHighWaterMark() > replicationState.getHighWaterMark()) {
+          var previousHighWaterMark = replicationState.getHighWaterMark();
+          replicationState.setHighWaterMark(request.getHighWaterMark());
+          applyLogEntries(previousHighWaterMark, request.getHighWaterMark());
+      }
+  }
+```
