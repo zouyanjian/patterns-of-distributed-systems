@@ -64,10 +64,9 @@
 | in-flight        | 在途          |
 | time to live     | 存活时间       |
 | head of line blocking | 队首阻塞  |
-| coordinator | 协调者 |
-| lag | 滞后 |
-| fanout | 扇出 |
-| incoming | 传入 |
-
-
+| coordinator      | 协调者        |
+| lag              | 滞后          |
+| fanout           | 扇出          |
+| incoming         | 传入          |
+| CommitIndex      | 提交索引       |
 
