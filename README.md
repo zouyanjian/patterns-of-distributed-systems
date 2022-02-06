@@ -69,4 +69,5 @@
 | fanout           | 扇出          |
 | incoming         | 传入          |
 | CommitIndex      | 提交索引       |
+| candidate        | 候选者        |
 

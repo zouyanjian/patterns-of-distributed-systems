@@ -196,3 +196,58 @@ class ReplicatedLog…
       }
   }
 ```
+
+#### 领导者选举
+
+领导者选举就是检测到日志条目在前一个 Quorum 中完成提交的阶段。每个集群节点都会在三种状态下运行：候选者（candidate）、领导者（leader）和追随者（follower）。在追随者状态下，在启动时，集群节点会期待收到来自既有领导者的[心跳（HeartBeat）](heartbeat.md)。如果一个追随者在预先确定的时间段内没有听到领导者任何声音，它就会进入到候选者状态，开启领导者选举。领导者选举算法会建立一个新的[世代时钟（Generation Clock）](generation-clock.md)值。Raft 将[世代时钟（Generation Clock）](generation-clock.md)称为 term。
+
+领导者选举机制也确保当选的领导者拥有 Quorum 所规定的最新日志条目。这是Raft所做的一个优化，避免了日志条目要从以前的 Quorum 转移新的领导者上。
+
+新领导者选举的启动要通过向每个对等服务器发送消息，请求开始投票。
+
+```java
+class ReplicatedLog…
+
+  private void startLeaderElection() {
+      replicationState.setGeneration(replicationState.getGeneration() + 1);
+      registerSelfVote();
+      requestVoteFrom(followers);
+  }
+```
+
+一旦服务器在某一[世代时钟（Generation Clock）](generation-clock.md)投票中得到投票，服务器总会为同样的世代返回同样的投票。这就确保了在选举成功发生的情况下，如果其它服务器以同样的世代请求投票，它是不会当选的。投票请求的处理过程如下：
+
+```java
+class ReplicatedLog…
+
+  VoteResponse handleVoteRequest(VoteRequest voteRequest) {
+      //for higher generation request become follower.
+      // But we do not know who the leader is yet.
+      if (voteRequest.getGeneration() > replicationState.getGeneration()) {
+          becomeFollower(LEADER_NOT_KNOWN, voteRequest.getGeneration());
+      }
+
+      VoteTracker voteTracker = replicationState.getVoteTracker();
+      if (voteRequest.getGeneration() == replicationState.getGeneration() && !replicationState.hasLeader()) {
+              if(isUptoDate(voteRequest) && !voteTracker.alreadyVoted()) {
+                  voteTracker.registerVote(voteRequest.getServerId());
+                  return grantVote();
+              }
+              if (voteTracker.alreadyVoted()) {
+                  return voteTracker.votedFor == voteRequest.getServerId() ?
+                          grantVote():rejectVote();
+
+              }
+      }
+      return rejectVote();
+  }
+
+  private boolean isUptoDate(VoteRequest voteRequest) {
+      boolean result = voteRequest.getLastLogEntryGeneration() > wal.getLastLogEntryGeneration()
+              || (voteRequest.getLastLogEntryGeneration() == wal.getLastLogEntryGeneration() &&
+              voteRequest.getLastLogEntryIndex() >= wal.getLastLogIndex());
+      return result;
+  }
+```
+
+收到大多数服务器投票的服务器会切换到领导者状态。这里的大多数是按照 [Quorum](quorum.md) 讨论的方式确定的。一旦当选，领导者会持续地向所有的追随者发送[心跳（HeartBeat）](heartbeat.md)。如果追随者在指定的时间间隔内没有收到[心跳（HeartBeat）](heartbeat.md)，就会触发新的领导者选举。
