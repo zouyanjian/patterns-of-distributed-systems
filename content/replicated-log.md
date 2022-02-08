@@ -30,7 +30,7 @@ https://martinfowler.com/articles/patterns-of-distributed-systems/replicated-log
 
 #### 复制客户端请求
 
-![复制内核](../image/raft-replication.png)
+![复制](../image/raft-replication.png)
 <center>图1：复制</center>
 
 对于每个日志条目而言，领导者会将其追加到其本地的预写日志中，然后，将其发送给所有追随者。
@@ -256,3 +256,36 @@ class ReplicatedLog…
 
 如上节所述，共识算法的第一阶段会检测既有的值，这些值在算法的前几次运行中已经复制过了。另一个关键点是，这些值就会提议为领导者最新世代的值。第二阶段会决定，只有当这些值提议为当前世代的值时，这些值才会得到提交。Raft 不会更新既有日志条目的世代数。因此，如果领导者拥有来自上一世代的日志条目，而这些条目在一些追随者中是缺失的，它不会仅仅根据大多数的 Quorum 就将这些条目标记为已提交。这是因为有其它服务器可能此时处于不可用的状态，但其拥有同样索引但更高世代的条目。如果领导者在没有复制其当前世代这些日志条目的情况下宕机了，这些条目就会被新的领导者改写。所以，在 Raft 中，新的领导者必须在其任期（term）内提交至少一个条目。然后，它可以安全地提交所有以前的条目。大多数实际的 Raft 实现都在领导者选举后，立即提交一个空操作（no-op）的日志项，这个动作会在领导者得到承认为客户端请求提供服务之前。详情请参考 [raft-phd](https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf) 3.6.1节。
 
+##### 一次领导者选举的示例
+
+考虑有五个服务器：雅典（athens）、拜占庭（byzantium）、锡兰（cyrene）、德尔菲（delphi）和以弗所（ephesus）。以弗所是第一代的领导者。它已经把日志条目复制了其自身、德尔菲和雅典。
+
+![失去连接触发选举](../image/raft-lost-heartbeats.png)
+<center>图2：失去连接触发选举</center>
+
+此时，以弗所（ephesus）和德尔菲（delphi）同集群的其它节点失去连接。
+
+拜占庭（byzantium）有最小的选举超时，因此，它会把[世代时钟（Generation Clock）](generation-clock.md)递增到 2，由此触发选举。锡兰（cyrene）其世代小于 2，而且它也有同拜占庭（byzantium）同样的日志条目。因此，它会批准这次投票。但是，雅典（athens）其日志中有额外的条目。因此，它会拒绝这次投票。
+
+因为拜占庭（byzantium）无法获得多数的 3 票，所以，它就失去了选举权，回到追随者状态。
+
+![因为日志不是最新的，失去了选举权](../image/raft-election-timeout.png)
+<center>图3：因为日志不是最新的，失去了选举权</center>
+
+雅典（athens）超时，触发下一轮选举。它将[世代时钟（Generation Clock）](generation-clock.md)递增到 3，并向拜占庭（byzantium）和锡兰（cyrene）发送了投票请求。因为拜占庭（byzantium）和锡兰（cyrene）的世代数比较低，也比雅典（athens）的日志条目少，二者都批准了雅典（athens）的投票。一旦雅典（athens）获得了大多数的投票，它就会变成领导者，开始向拜占庭（byzantium）和锡兰（cyrene）发送心跳。一旦拜占庭（byzantium）和锡兰（cyrene）接收到了来自更高世代的心跳，它们会递增他们的世代。这就确认了雅典（athens）的领导者地位，雅典（athens）随后就会将自己的日志复制给拜占庭（byzantium）和锡兰（cyrene）。
+
+![拥有最新日志的节点赢得选举](../image/raft-won-election.png)
+<center>图4：拥有最新日志的节点赢得选举</center>
+
+雅典（athens）现在将来自世代 1 的 Entry2 复制给拜占庭（byzantium）和锡兰（cyrene）。但由于它是上一代的日志条目，即便 Entry2 成功的在大多数 Quorum 上复制，它也不会更新提交索引（commitIndex）。
+
+![](../image/raft-leader-commitIndex-previous-term.png)
+
+雅典（athens）在其本地日志中追加了一个空操作（no-op）的条目。在这个第 3 代的新条目成功复制后，它会更新提交索引（commitIndex）。
+
+![](../image/raft-leader-commitIndex-append-no-op.png)
+
+如果以弗所（ephesus）回来或是恢复了网络连接，它会向锡兰（cyrene）发送请求。因为锡兰（cyrene）现在是第 3 代了，它会拒绝这个请求。以弗所（ephesus）会在拒绝应答中得到新的任期（term），下台成为一个追随者。
+
+![拥有最新日志的节点赢得选举](../image/raft-leader-stepdown.png)
+<center>图7：Leader step-down</center>
