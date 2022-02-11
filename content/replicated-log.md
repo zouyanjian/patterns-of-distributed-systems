@@ -28,7 +28,7 @@ https://martinfowler.com/articles/patterns-of-distributed-systems/replicated-log
 
 [多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s) 和 [Raft](https://raft.github.io/) 是最流行的实现复制日志的算法。多 Paxos 只在学术论文中有描述，却又语焉不详。[Spanner](https://cloud.google.com/spanner) 和 [Cosmos DB](https://docs.microsoft.com/en-us/azure/cosmos-db/introduction) 等云数据库采用了[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s)，但实现细节却没有很好地记录下来。Raft 非常清楚地记录了所有的实现细节，因此，它成了大多数开源系统的首选实现方式，尽管 Paxos 及其变体在学术界得到了讨论得更多。
 
-#### 复制客户端请求
+### 复制客户端请求
 
 ![复制](../image/raft-replication.png)
 <center>图1：复制</center>
@@ -123,7 +123,7 @@ leader (class ReplicatedLog...)
   }
 ```
 
-##### 完全复制
+#### 完全复制
 
 有一点非常重要，就是要确保所有的节点都能收到来自领导者所有的日志条目，即便是节点断开连接，或是崩溃之后又恢复之后。Raft 有个机制确保所有的集群节点能够收到来自领导者的所有日志条目。
 
@@ -167,7 +167,7 @@ leader (class ReplicatedLog...)
 
 Raft 没有单独的提交消息，而是将提交索引（commitIndex）作为常规复制请求的一部分进行发送。空的复制请求也可以当做心跳发送。因此，commitIndex 会当做心跳请求的一部分发送给追随者。
 
-##### 日志条目以日志顺序执行
+#### 日志条目以日志顺序执行
 
 一旦领导者更新了它的 commitIndex，它就会按顺序执行日志条目，从上一个 commitIndex 的值执行到最新的 commitIndex 值。一旦日志条目执行完毕，客户端请求就完成了，应答会返回给客户端。
 
@@ -197,7 +197,7 @@ class ReplicatedLog…
   }
 ```
 
-#### 领导者选举
+### 领导者选举
 
 领导者选举就是检测到日志条目在前一个 Quorum 中完成提交的阶段。每个集群节点都会在三种状态下运行：候选者（candidate）、领导者（leader）和追随者（follower）。在追随者状态下，在启动时，集群节点会期待收到来自既有领导者的[心跳（HeartBeat）](heartbeat.md)。如果一个追随者在预先确定的时间段内没有听到领导者任何声音，它就会进入到候选者状态，开启领导者选举。领导者选举算法会建立一个新的[世代时钟（Generation Clock）](generation-clock.md)值。Raft 将[世代时钟（Generation Clock）](generation-clock.md)称为任期（term）。
 
@@ -252,11 +252,11 @@ class ReplicatedLog…
 
 收到大多数服务器投票的服务器会切换到领导者状态。这里的大多数是按照 [Quorum](quorum.md) 讨论的方式确定的。一旦当选，领导者会持续地向所有的追随者发送[心跳（HeartBeat）](heartbeat.md)。如果追随者在指定的时间间隔内没有收到[心跳（HeartBeat）](heartbeat.md)，就会触发新的领导者选举。
 
-##### 来自上一世代的日志条目
+#### 来自上一世代的日志条目
 
 如上节所述，共识算法的第一阶段会检测既有的值，这些值在算法的前几次运行中已经复制过了。另一个关键点是，这些值就会提议为领导者最新世代的值。第二阶段会决定，只有当这些值提议为当前世代的值时，这些值才会得到提交。Raft 不会更新既有日志条目的世代数。因此，如果领导者拥有来自上一世代的日志条目，而这些条目在一些追随者中是缺失的，它不会仅仅根据大多数的 Quorum 就将这些条目标记为已提交。这是因为有其它服务器可能此时处于不可用的状态，但其拥有同样索引但更高世代的条目。如果领导者在没有复制其当前世代这些日志条目的情况下宕机了，这些条目就会被新的领导者改写。所以，在 Raft 中，新的领导者必须在其任期（term）内提交至少一个条目。然后，它可以安全地提交所有以前的条目。大多数实际的 Raft 实现都在领导者选举后，立即提交一个空操作（no-op）的日志项，这个动作会在领导者得到承认为客户端请求提供服务之前。详情请参考 [raft-phd](https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf) 3.6.1节。
 
-##### 一次领导者选举的示例
+#### 一次领导者选举的示例
 
 考虑有五个服务器：雅典（athens）、拜占庭（byzantium）、锡兰（cyrene）、德尔菲（delphi）和以弗所（ephesus）。以弗所是第一代的领导者。它已经把日志条目复制了其自身、德尔菲和雅典。
 
@@ -290,7 +290,7 @@ class ReplicatedLog…
 ![拥有最新日志的节点赢得选举](../image/raft-leader-stepdown.png)
 <center>图7：Leader step-down</center>
 
-#### 技术考量
+### 技术考量
 
 以下是任何复制日志机制都需要有的一些重要技术考量。
 
@@ -315,3 +315,8 @@ Raft 会为每个集群节点维护一个状态，以便了解在每个节点上
 [EPaxos](https://www.cs.cmu.edu/~dga/papers/epaxos-sosp2013.pdf) 就是一种不依赖单一领导者对请求进行排序的算法。
 
 在像 [MongoDB](https://www.mongodb.com/) 这样的分区数据库中，每个分区都会维护一个复制日志。因此，请求是按分区排序的，而非跨分区。
+
+### 推送（Push） vs. 拉取（Pull）
+
+在这里解释的 [Raft](https://raft.github.io/) 复制机制中，领导者可以将所有日志条目推送给追随者，也可以让追随者来拉取日志条目。[Kafka](https://kafka.apache.org/) 的 [Raft 实现](https://cwiki.apache.org/confluence/display/KAFKA/KIP-595%3A+A+Raft+Protocol+for+the+Metadata+Quorum)就遵循了基于拉取的复制。
+
