@@ -325,3 +325,9 @@ Raft 会为每个集群节点维护一个状态，以便了解在每个节点上
 复制日志机制广泛地用于各种应用之中，从键值存储到[区块链](https://en.wikipedia.org/wiki/Blockchain)。
 
 对键值存储而言，日志条目是关于设置键值与值的。对于[租约（Lease）](lease.md)而言，日志条目是关于设置命名租约的。对于区块链而言，日志条目是区块链中的区块，它需要以同样的顺序提供给所有的对等体（peer）。对于像 [MongoDB](https://www.mongodb.com/) 这样的数据库而言，日志条目就是需要持续复制的数据。
+
+## 示例
+
+复制日志是 [Raft](https://raft.github.io/)、[多 Paxos](https://www.youtube.com/watch?v=JEpsBg0AO6o&t=1920s)、[Zab](https://zookeeper.apache.org/doc/r3.4.13/zookeeperInternals.html#sc_atomicBroadcast) 和 [viewstamped 复制](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)协议使用的机制。这种技术被称为[状态机复制](https://en.wikipedia.org/wiki/State_machine_replication)，各个副本都以以相同的顺序执行相同的命令。[一致性内核（Consistent Core）](consistent-core.md)通常是用状态机复制机制构建出来的。
+
+像 [hyperledger fabric](https://github.com/hyperledger/fabric)这样的区块链实现有一个排序组件，它是基于复制日志的机制。之前版本的 hyperledger fabric 使用 [Kafka](https://kafka.apache.org/)对区块链中的区块进行排序。最近的版本则使用 [Raft](https://raft.github.io/) 达成同样的目的。
