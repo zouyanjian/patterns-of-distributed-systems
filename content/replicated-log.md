@@ -320,3 +320,8 @@ Raft 会为每个集群节点维护一个状态，以便了解在每个节点上
 
 在这里解释的 [Raft](https://raft.github.io/) 复制机制中，领导者可以将所有日志条目推送给追随者，也可以让追随者来拉取日志条目。[Kafka](https://kafka.apache.org/) 的 [Raft 实现](https://cwiki.apache.org/confluence/display/KAFKA/KIP-595%3A+A+Raft+Protocol+for+the+Metadata+Quorum)就遵循了基于拉取的复制。
 
+### 日志里有什么？
+
+复制日志机制广泛地用于各种应用之中，从键值存储到[区块链](https://en.wikipedia.org/wiki/Blockchain)。
+
+对键值存储而言，日志条目是关于设置键值与值的。对于[租约（Lease）](lease.md)而言，日志条目是关于设置命名租约的。对于区块链而言，日志条目是区块链中的区块，它需要以同样的顺序提供给所有的对等体（peer）。对于像 [MongoDB](https://www.mongodb.com/) 这样的数据库而言，日志条目就是需要持续复制的数据。
