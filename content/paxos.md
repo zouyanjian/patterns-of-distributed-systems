@@ -40,3 +40,110 @@ Paxos 是一个难于理解的协议。我们先从一个展示协议典型流�
 
 这些是 paxos 的基本规则，但想要理解它们是如何组成一个有效行为却是非常困难的。因此，这里会用一个说明它是如何工作的。
 
+![](../image/mfpaxos-initial-requests.png)
+
+考虑一个有五个节点的集群：雅典（Athens）、拜占庭（Byzantium）、锡兰（Cyrene）、德尔菲（Delphi）和以弗所（Ephesus）。一个客户端联系雅典（Athens）节点，请求将名字设置为“alice”。雅典（Athens）现在需要发起一个 Paxos 交互，看是否所有节点都同意这个变化。雅典（Athens）称为提议者，因为在这个过程中，雅典（Athens）向所有其它节点建议将集群中的名字改成“alice”。集群中的所有节点（包括雅典（Athens）自身）都是“接受者”，这意味着它们能够接受提议。
+
+在雅典（Athens）提议“alice”的同时，以弗所（Ephesus）节点也得到了一个请求，将名字设置为“elanor”。这让以弗所（Ephesus）也成为了一个提议者。
+
+[](../image/mfpaxos-initial-prepare.png)
+
+在准备阶段，提议者首先发送一些准备请求，这些请求都包括一个世代数。由于 Paxos 旨在避免单点故障，我们不会从单一的世代时钟中获取这个数字。相反，每个节点都维护着自己的世代时钟，它将生成号码与节点 ID 相结合。节点 ID 被用来打破平局，所以，[2,a] > [1,e] > [1,a]。每个接受者都记录着它到目前为止所见的最新承诺。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|1,a|1,a|0|1,e|1,e|
+|接受的值|无|无|无|无|无|
+
+由于它们在此之前没有见过任何请求，所以，它们都会向调用的提议者返回一个承诺。我们将返回的值称为“承诺”，因为它表明接受者承诺不考虑任何世代时钟早于已承诺的消息。
+
+[](../image/mfpaxos-a-prepare-c.png)
+
+雅典（Athens）将准备好的信息发送给锡兰（Cyrene）。当它收到一个返回的承诺时，这意味着它现在已经得到了五个节点中三个节点的承诺，这表示达成了一个 [Quorum](quorum.md)。雅典（Athens）现在就从发送准备信息切换为发送接受信息。
+
+有可能雅典（Athens）未能收到大多数集群节点的承诺。在这种情况下，雅典（Athens）可以通过递增世代时钟的方式对准备请求进行重试。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|1,a|1,a|1,a|1,e|1,e|
+|接受的值|无|无|无|无|无|
+
+[](../image/mfpaxos-accept-ac.png)
+
+雅典（Athens）现在开始发送接受信息，其中包含世代以及提议的值。雅典（Athens）和拜占庭（Byzantium）接受了该提议。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|1,a|1,a|1,a|1,e|1,e|
+|接受的值|alice|alice|无|无|无|
+
+[](../image/mfpaxos-e-prepare-c.png)
+
+以弗所（Ephesus）现在向锡兰（Cyrene）发出了一个准备信息。锡兰（Cyrene）曾向雅典（Athens）发出一次承诺，但以弗所（Ephesus）的请求有着更高的世代，所以它优先。锡兰（Cyrene）向以弗所（Ephesus）发回了一个承诺。
+
+[](../image/mfpaxos-c-refuses-a.png!)
+
+锡兰（Cyrene）现在接收到雅典（Athens）的接受请求，但却拒绝了它，因为其世代数已经落后于它对以弗所（Ephesus）的承诺。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|1,a|1,a|1,e|1,e|1,e|
+|接受的值|alice|alice|无|无|无|
+
+[](../image/mfpaxos-e-send-accepts.png)
+
+现在，以弗所（Ephesus）已经从它的准备消息中得到了一个 Quorum，所以，它可以继续发送接受消息了。它向自己与德尔菲（Delphi）发送了接受消息，但是，在它发送更多的接受消息之前，它崩溃了。
+
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|1,a|1,a|1,e|1,e|1,e|
+|接受的值|alice|alice|无|elanor|elanor|
+
+与此同时，雅典（Athens）必须处理其接受请求被锡兰（Cyrene）拒绝的问题。这表明它的 Quorum 不再能够给予它承诺了，因此，其提议会失败。一个提议者像这样失去最初的 Quorum，这种情况就会发生；另一个提议者要取得 Quorum，第一个提议者的 Quorum 中至少要有一个成员叛变。
+
+在一个简单的两阶段提交的情况下，我们会期望以弗所（Ephesus）继续执行下去，让它的值得到选择，这个模式会有问题，因为以弗所（Ephesus）已经崩溃了。如果它拥有了接受者 Quorum 的锁，它的崩溃会让整个提议过程陷入死锁。然而，Paxos 预计到这种事情会发生，因此，雅典（Athens）会再进行一次尝试，这次它会采用一个更高的世代数。
+
+[](../image/mfpaxos-a-2nd-prep.png)
+
+它会再次发送准备消息，但是这次的世代数会更高。同第一轮一样，它依然会得到三组承诺，但会有一个重要的区别。雅典（Athens）之前已经接受了“alice”，德尔菲（Delphi）已经接受了“elanor”。这两个接受者都返回了承诺，而且还返回了它们已经接受的值，以及它们所接受提议的世代数。在返回这个值的时候，它们会更新其承诺的世代，也就变成了[2,a]，这样就可以反映它们对雅典（Athens）所做的承诺。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|2,a|1,a|2,a|2,a|1,e|
+|接受的值|alice|alice|无|elanor|elanor|
+
+拥有了 Quorum 的雅典（Athens）现在必须进入到接受阶段，但它提议拥有最高世代的已接受值，也就是“elanor”，这是德尔菲（Delphi）所接受的，其世代为[1,e]，它大于雅典（Athens）接受的“alice”，其世代为[1,a]。
+
+[](../image/mfpaxos-a-2nd-accept.png)
+
+雅典（Athens）开始发送接受请求，但是，现在发出的是“elanor”及其当前世代。雅典（Athens）给自己发了一个接受请求，这会得到接受。这是一个关键的接受，因为现在有三个节点接受了“elanor”，也就是说，“elanor”达到了 Quorum，因此，我们可以认为“elanor”成为了选中的值。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|2,a|1,a|2,a|2,a|1,e|
+|接受的值|elanor|alice|无|elanor|elanor|
+
+但是，尽管“elanor”现已成为选中的值，但没人知道这一点。在接受阶段，雅典（Athens）只知道自己有“elanor”这个值，这不是一个 Quorum，而且以弗所（Ephesus）已经下线了。雅典（Athens）需要做的就是再接受到几个接受请求，它就可以提交了。但此时，雅典（Athens）崩溃了。
+
+在这个时点上，雅典（Athens）和以弗所（Ephesus）此刻都已经崩溃了。但是集群仍然有一个节点的 Quorum 在运行，所以，它们应该能够继续工作，事实上，通过遵循协议，他们可以发现 “elanor”是选中的值。
+
+[](../image/mfpaxos-c-prepare.png)
+
+锡兰（Cyrene）接收到一个请求，将名字设置为“carol”，因此，它变成了一个提议者。它看到了[2,a]这个世代，所以，它会启动[3,c]这个世代的准备阶段。虽然它希望提议用“carol”作为名字，但当前它只是发出了准备请求。
+
+锡兰（Cyrene）向集群中的其余节点发送准备信息。与雅典（Athens）之前的准备阶段一样，锡兰（Cyrene）会得到已接受的值，所以，“carol”不会得到提议的机会。同之前一样，德尔菲（Delphi）的“elanor”比拜占庭（Byzantium）的“alice”晚，所以，锡兰（Cyrene）会用 “elanor”和[3,c]开启一个接受阶段。
+
+|节点|雅典（Athens）|拜占庭（Byzantium）|锡兰（Cyrene）|德尔菲（Delphi）|以弗所（Ephesus）|
+|-|-|-|-|-|-|
+|承诺的世代|2,a|3,c|3,c|3,c|1,e|
+|接受的值|elanor|alice|无|elanor|elanor|
+
+[](../image/mfpaxos-c-accept.png)
+
+虽然我还可以继续崩溃和唤醒节点，但现在很明显，“elanor”将赢得胜利。只要有节点的 Quorum 在运行，其中至少有一个节点的值是 “elanor”，任何试图进行准备的节点都必须联系一个接受了“elanor”的节点，以便在准备阶段获得一个 Quorum。因此，我们将以 锡兰（Cyrene）发出提交结束这个讨论。
+
+[](../image/mfpaxos-c-commit.png)
+
+在某些时点，雅典（Athens）和以弗所（Ephesus）会重新上线，它们会发现 Quorum 的选择。
+
