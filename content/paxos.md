@@ -170,3 +170,141 @@ Paxos 是一个难于理解的协议。我们先从一个展示协议典型流�
 每当一个提议者需要选择一个新的世代时，它必须等待一段随机的时间，我们可以以此确保减少这种活锁发生的机会。一个提议者在另一个提议者向全部 Quorum 发起准备请求之前，就让一个 Quorum 得到接受，这种随机性就让这种情况成为了可能。
 
 但我们永远无法杜绝活锁的发生。这是一个基本的权衡：要么确保安全，要么确保活锁，二者不能得兼。Paxos 首先确保安全。
+
+### 一个样例的键值存储
+
+这里解释的 Paxos 协议，构建的是对于单一值的共识（通常称为单一 Paxos）。大多数主流产品（如 [Cosmos DB](https://docs.microsoft.com/en-us/azure/cosmos-db/introduction) 或 [Spanner](https://cloud.google.com/spanner)）中使用的实际实现都是对 Paxos 进行了修改，称为多重 paxos，其实现方式为 [复制日志（Replicated Log）](replicated-log.md)。
+
+但是，一个简单的键值存储可以使用基本的 Paxos 进行构建。[[cassandra](http://cassandra.apache.org/)]以类似的方式使用基本 Paxos 实现了其轻量级的事务。
+
+键值存储为每个键值维护了一个 Paxos 实例。
+
+```java
+class PaxosPerKeyStore…
+
+  int serverId;
+  public PaxosPerKeyStore(int serverId) {
+      this.serverId = serverId;
+  }
+
+  Map<String, Acceptor> key2Acceptors = new HashMap<String, Acceptor>();
+  List<PaxosPerKeyStore> peers;
+```
+
+Acceptor 存储了 promisedGeneration、acceptedGeneration 和 acceptedValue。
+
+```java
+class Acceptor…
+
+  public class Acceptor {
+      MonotonicId promisedGeneration = MonotonicId.empty();
+
+      Optional<MonotonicId> acceptedGeneration = Optional.empty();
+      Optional<Command> acceptedValue = Optional.empty();
+
+      Optional<Command> committedValue = Optional.empty();
+      Optional<MonotonicId> committedGeneration = Optional.empty();
+
+      public AcceptorState state = AcceptorState.NEW;
+      private BiConsumer<Acceptor, Command> kvStore;
+```
+
+当键值和值放到了 kv 存储时，它就运行了 Paxos 协议。
+
+```java
+class PaxosPerKeyStore…
+
+  int maxKnownPaxosRoundId = 1;
+  int maxAttempts = 4;
+  public void put(String key, String defaultProposal) {
+      int attempts = 0;
+      while(attempts <= maxAttempts) {
+          attempts++;
+          MonotonicId requestId = new MonotonicId(maxKnownPaxosRoundId++, serverId);
+          SetValueCommand setValueCommand = new SetValueCommand(key, defaultProposal);
+
+          if (runPaxos(key, requestId, setValueCommand)) {
+              return;
+          }
+
+          Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), MILLISECONDS);
+          logger.warn("Experienced Paxos contention. Attempting with higher generation");
+      }
+      throw new WriteTimeoutException(attempts);
+  }
+
+  private boolean runPaxos(String key, MonotonicId generation, Command initialValue) {
+      List<Acceptor> allAcceptors = getAcceptorInstancesFor(key);
+      List<PrepareResponse> prepareResponses = sendPrepare(generation, allAcceptors);
+      if (isQuorumPrepared(prepareResponses)) {
+          Command proposedValue = getValue(prepareResponses, initialValue);
+          if (sendAccept(generation, proposedValue, allAcceptors)) {
+              sendCommit(generation, proposedValue, allAcceptors);
+          }
+          if (proposedValue == initialValue) {
+              return true;
+          }
+      }
+      return false;
+  }
+
+  public Command getValue(List<PrepareResponse> prepareResponses, Command initialValue) {
+      PrepareResponse mostRecentAcceptedValue = getMostRecentAcceptedValue(prepareResponses);
+      Command proposedValue
+              = mostRecentAcceptedValue.acceptedValue.isEmpty() ?
+              initialValue : mostRecentAcceptedValue.acceptedValue.get();
+      return proposedValue;
+  }
+
+  private PrepareResponse getMostRecentAcceptedValue(List<PrepareResponse> prepareResponses) {
+      return prepareResponses.stream().max(Comparator.comparing(r -> r.acceptedGeneration.orElse(MonotonicId.empty()))).get();
+  }
+class Acceptor…
+
+  public PrepareResponse prepare(MonotonicId generation) {
+
+      if (promisedGeneration.isAfter(generation)) {
+          return new PrepareResponse(false, acceptedValue, acceptedGeneration, committedGeneration, committedValue);
+      }
+      promisedGeneration = generation;
+      state = AcceptorState.PROMISED;
+      return new PrepareResponse(true, acceptedValue, acceptedGeneration, committedGeneration, committedValue);
+
+  }
+class Acceptor…
+
+  public boolean accept(MonotonicId generation, Command value) {
+      if (generation.equals(promisedGeneration) || generation.isAfter(promisedGeneration)) {
+          this.promisedGeneration = generation;
+          this.acceptedGeneration = Optional.of(generation);
+          this.acceptedValue = Optional.of(value);
+          return true;
+      }
+      state = AcceptorState.ACCEPTED;
+      return false;
+  }
+```
+
+只有当值成功地提交时，它才会存储到 kv 存储中。
+
+```java
+class Acceptor…
+
+  public void commit(MonotonicId generation, Command value) {
+      committedGeneration = Optional.of(generation);
+      committedValue = Optional.of(value);
+      state = AcceptorState.COMMITTED;
+      kvStore.accept(this, value);
+  }
+class PaxosPerKeyStore…
+
+  private void accept(Acceptor acceptor, Command command) {
+      if (command instanceof SetValueCommand) {
+          SetValueCommand setValueCommand = (SetValueCommand) command;
+          kv.put(setValueCommand.getKey(), setValueCommand.getValue());
+      }
+      acceptor.resetPaxosState();
+  }
+```
+
+Paxos 状态需要持久化。使用[预写日志（Write-Ahead Log）](write-ahead-log.md)可以轻松做到这一点。
