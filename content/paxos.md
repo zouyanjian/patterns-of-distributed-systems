@@ -308,3 +308,23 @@ class PaxosPerKeyStore…
 ```
 
 Paxos 状态需要持久化。使用[预写日志（Write-Ahead Log）](write-ahead-log.md)可以轻松做到这一点。
+
+#### 处理多值
+
+值得注意的是，Paxos 在处理单值上有详细的做法，而且得到了证明。因此，用单值 Paxos 协议处理多值需要在协议规范之外进行处理。一种替代方法是重置状态，单独存储提交过的值，以确保它们不会丢失。
+
+```java
+class Acceptor…
+
+  public void resetPaxosState() {
+      //This implementation has issues if committed values are not stored
+      //and handled separately in the prepare phase.
+      //See Cassandra implementation for details.
+      //https://github.com/apache/cassandra/blob/trunk/src/java/org/apache/cassandra/db/SystemKeyspace.java#L1232
+      promisedGeneration = MonotonicId.empty();
+      acceptedGeneration = Optional.empty();
+      acceptedValue = Optional.empty();
+  }
+```
+
+[(gryadka)[https://github.com/gryadka/js]]给出了另外一种做法，它稍微修改了一下基本的 Paxos 以便设置多个值。在基本的算法之外执行一些步骤，这种需求就是在实践中首选[复制日志（Replicated Log）](replicated-log.md)的原因。
