@@ -328,3 +328,28 @@ class Acceptor…
 ```
 
 [(gryadka)[https://github.com/gryadka/js]]给出了另外一种做法，它稍微修改了一下基本的 Paxos 以便设置多个值。在基本的算法之外执行一些步骤，这种需求就是在实践中首选[复制日志（Replicated Log）](replicated-log.md)的原因。
+
+#### 读取值
+
+Paxos 依靠于准备阶段对任何未提交的值进行检测。因此，如果采用基本的 Paxos 实现如上所示的键值存储，那读取操作也需要运行完整的 Paxos 算法。
+
+```java
+class PaxosPerKeyStore…
+
+  public String get(String key) {
+      int attempts = 0;
+      while(attempts <= maxAttempts) {
+          attempts++;
+          MonotonicId requestId = new MonotonicId(maxKnownPaxosRoundId++, serverId);
+          Command getValueCommand = new NoOpCommand(key);
+          if (runPaxos(key, requestId, getValueCommand)) {
+              return kv.get(key);
+          }
+
+          Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), MILLISECONDS);
+          logger.warn("Experienced Paxos contention. Attempting with higher generation");
+
+      }
+      throw new WriteTimeoutException(attempts);
+  }
+```
