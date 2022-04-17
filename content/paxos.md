@@ -353,3 +353,9 @@ class PaxosPerKeyStore…
       throw new WriteTimeoutException(attempts);
   }
 ```
+
+## 示例
+
+[cassandra](http://cassandra.apache.org/) 采用 Paxos 实现了轻量级事务。
+
+所有的共识算法，比如 Raft，都采用了类似于基本的 Paxos 的基本概念。两阶段提交、[Quorum](quorum.md) 和[世代时钟（Generation Clock）](generation-clock.md)的使用方式都是类似的。
