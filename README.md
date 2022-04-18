@@ -22,7 +22,7 @@
 * [领导者和追随者（Leader and Followers）](content/leader-and-followers.md)
 * [租约（Lease）](content/lease.md)
 * [低水位标记（Low-Water Mark）](content/low-water-mark.md)
-* Paxos
+* [Paxos](content/paxos.md)
 * [Quorum](content/quorum.md)
 * [复制日志（Replicated Log）](content/replicated-log.md)
 * 批量请求（Request Batch）

@@ -175,7 +175,7 @@ Paxos 是一个难于理解的协议。我们先从一个展示协议典型流�
 
 这里解释的 Paxos 协议，构建的是对于单一值的共识（通常称为单一 Paxos）。大多数主流产品（如 [Cosmos DB](https://docs.microsoft.com/en-us/azure/cosmos-db/introduction) 或 [Spanner](https://cloud.google.com/spanner)）中使用的实际实现都是对 Paxos 进行了修改，称为多重 paxos，其实现方式为 [复制日志（Replicated Log）](replicated-log.md)。
 
-但是，一个简单的键值存储可以使用基本的 Paxos 进行构建。[[cassandra](http://cassandra.apache.org/)]以类似的方式使用基本 Paxos 实现了其轻量级的事务。
+但是，一个简单的键值存储可以使用基本的 Paxos 进行构建。[cassandra](http://cassandra.apache.org/) 以类似的方式使用基本 Paxos 实现了其轻量级的事务。
 
 键值存储为每个键值维护了一个 Paxos 实例。
 
@@ -358,4 +358,4 @@ class PaxosPerKeyStore…
 
 [cassandra](http://cassandra.apache.org/) 采用 Paxos 实现了轻量级事务。
 
-所有的共识算法，比如 Raft，都采用了类似于基本的 Paxos 的基本概念。两阶段提交、[Quorum](quorum.md) 和[世代时钟（Generation Clock）](generation-clock.md)的使用方式都是类似的。
+所有的共识算法，比如 [Raft](https://raft.github.io/)，都采用了类似于基本的 Paxos 的基本概念。[两阶段提交（Two Phase Commit）](two-phase-commit.md)、[Quorum](quorum.md) 和[世代时钟（Generation Clock）](generation-clock.md)的使用方式都是类似的。
