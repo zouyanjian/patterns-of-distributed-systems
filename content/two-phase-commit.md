@@ -1,16 +1,16 @@
-# 两段式提交（Two Phase Commit）
+# 两阶段提交（Two Phase Commit）
 
 **原文**
 
 https://martinfowler.com/articles/patterns-of-distributed-systems/two-phase-commit.html
 
-保证多个节点更新操作的原子性。
+在一个原子操作里更新多个节点的资源。
 
-**2022.3.18**
+**2021.1.18**
 
 ## 问题
 
-当需要保证存储操作在集群多个节点上的原子性时，单个节点在知道其他节点的决定之前不能让客户端访问这些数据。每个节点都需要知道其他节点是否成功存储数据。
+当数据需要在多个集群节点上进行原子化地存储时，集群节点在了解其他集群节点的决定之前，是不能让客户端进行访问数据的。每个节点都需要知道其它的节点是成功地存储数据，还是失败了。
 
 ## 解决方案
 
@@ -990,5 +990,3 @@ class TransactionCoordinator…
 像 [CockroachDb](https://www.cockroachlabs.com/docs/stable/)，[MongoDb](https://www.MongoDb.com/)这样的分布式数据库。利用两段式提交实现了跨分区的原子操作。
 
 [Kafka](https://kafka.apache.org/)通过类似两段式提交的方式保证生产消息跨多个分区的原子性。
-
-
