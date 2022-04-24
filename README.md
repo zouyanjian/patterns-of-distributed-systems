@@ -22,7 +22,7 @@
 * [领导者和追随者（Leader and Followers）](content/leader-and-followers.md)
 * [租约（Lease）](content/lease.md)
 * [低水位标记（Low-Water Mark）](content/low-water-mark.md)
-* Paxos
+* [Paxos](content/paxos.md)
 * [Quorum](content/quorum.md)
 * [复制日志（Replicated Log）](content/replicated-log.md)
 * 批量请求（Request Batch）
@@ -31,7 +31,7 @@
 * [单一 Socket 通道（Single Socket Channel）](content/single-socket-channel.md)
 * [单一更新队列（Singular Update Queue）](content/singular-update-queue.md)
 * [状态监控（State Watch）](content/state-watch.md)
-* 两阶段提交（Two Phase Commit）
+* [两阶段提交（Two Phase Commit）](content/two-phase-commit.md)
 * [版本向量（Version Vector）](content/version-vector.md)
 * [有版本的值（Versioned Values）](content/versioned-value.md)
 * [预写日志（Write-Ahead Log）](content/write-ahead-log.md)
